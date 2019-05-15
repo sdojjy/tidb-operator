@@ -96,7 +96,7 @@ func (tmm *tidbMemberManager) syncTiDBHeadlessServiceForTidbCluster(tc *v1alpha1
 	tcName := tc.GetName()
 
 	newSvc := tmm.getNewTiDBHeadlessServiceForTidbCluster(tc)
-	oldSvc, err := tmm.svcLister.Services(ns).Get(controller.TiDBPeerMemberName(tcName))
+	oldSvcTmp, err := tmm.svcLister.Services(ns).Get(controller.TiDBPeerMemberName(tcName))
 	if errors.IsNotFound(err) {
 		err = SetServiceLastAppliedConfigAnnotation(newSvc)
 		if err != nil {
@@ -108,6 +108,8 @@ func (tmm *tidbMemberManager) syncTiDBHeadlessServiceForTidbCluster(tc *v1alpha1
 		return err
 	}
 
+	oldSvc := oldSvcTmp.DeepCopy()
+
 	equal, err := serviceEqual(newSvc, oldSvc)
 	if err != nil {
 		return err
@@ -115,8 +117,6 @@ func (tmm *tidbMemberManager) syncTiDBHeadlessServiceForTidbCluster(tc *v1alpha1
 	if !equal {
 		svc := *oldSvc
 		svc.Spec = newSvc.Spec
-		// TODO add unit test
-		svc.Spec.ClusterIP = oldSvc.Spec.ClusterIP
 		err = SetServiceLastAppliedConfigAnnotation(newSvc)
 		if err != nil {
 			return err
@@ -133,7 +133,7 @@ func (tmm *tidbMemberManager) syncTiDBStatefulSetForTidbCluster(tc *v1alpha1.Tid
 	tcName := tc.GetName()
 
 	newTiDBSet := tmm.getNewTiDBSetForTidbCluster(tc)
-	oldTiDBSet, err := tmm.setLister.StatefulSets(ns).Get(controller.TiDBMemberName(tcName))
+	oldTiDBSetTemp, err := tmm.setLister.StatefulSets(ns).Get(controller.TiDBMemberName(tcName))
 	if errors.IsNotFound(err) {
 		err = SetLastAppliedConfigAnnotation(newTiDBSet)
 		if err != nil {
@@ -146,6 +146,7 @@ func (tmm *tidbMemberManager) syncTiDBStatefulSetForTidbCluster(tc *v1alpha1.Tid
 		tc.Status.TiDB.StatefulSet = &apps.StatefulSetStatus{}
 		return nil
 	}
+	oldTiDBSet := oldTiDBSetTemp.DeepCopy()
 	if err != nil {
 		return err
 	}
