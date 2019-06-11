@@ -127,9 +127,8 @@ func admitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			}
 			// TODO use context instead
 			os.Exit(3)
-		} else {
-			glog.Infof("savely delete pod namespace %s name %s isowner %t", namespace, name, info.IsOwner)
 		}
+		glog.Infof("savely delete pod namespace %s name %s isowner %t", namespace, name, info.IsOwner)
 
 	} else if pod.Labels[label.ComponentLabelKey] == "pd" {
 
@@ -139,7 +138,7 @@ func admitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			return &reviewResponse
 		}
 
-		if leader.Name == name && tc.Status.TiDB.StatefulSet.Replicas > 1 {
+		if leader.Name == name && tc.Status.PD.StatefulSet.Replicas > 1 {
 			time.Sleep(10 * time.Second)
 			err := fmt.Errorf("pd is leader, can't be deleted namespace %s name %s", namespace, name)
 			glog.Error(err)
@@ -149,9 +148,8 @@ func admitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			}
 			// TODO use context instead
 			os.Exit(3)
-		} else {
-			glog.Infof("savely delete pod namespace %s name %s leader name %s", namespace, name, leader.Name)
 		}
+		glog.Infof("savely delete pod namespace %s name %s leader name %s", namespace, name, leader.Name)
 
 	} else if pod.Labels[label.ComponentLabelKey] == "tikv" {
 
@@ -194,9 +192,8 @@ func admitPods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			}
 			// TODO use context instead
 			os.Exit(3)
-		} else {
-			glog.Infof("savely delete pod namespace %s name %s before count %d after count %d", namespace, name, beforeCount, afterCount)
 		}
+		glog.Infof("savely delete pod namespace %s name %s before count %d after count %d", namespace, name, beforeCount, afterCount)
 	}
 	reviewResponse.Allowed = true
 	return &reviewResponse

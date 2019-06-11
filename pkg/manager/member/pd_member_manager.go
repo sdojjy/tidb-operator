@@ -40,6 +40,7 @@ type pdMemberManager struct {
 	setLister    v1beta1.StatefulSetLister
 	svcLister    corelisters.ServiceLister
 	podLister    corelisters.PodLister
+	epsLister    corelisters.EndpointsLister
 	podControl   controller.PodControlInterface
 	pvcLister    corelisters.PersistentVolumeClaimLister
 	pdScaler     Scaler
@@ -55,6 +56,7 @@ func NewPDMemberManager(pdControl controller.PDControlInterface,
 	setLister v1beta1.StatefulSetLister,
 	svcLister corelisters.ServiceLister,
 	podLister corelisters.PodLister,
+	epsLister corelisters.EndpointsLister,
 	podControl controller.PodControlInterface,
 	pvcLister corelisters.PersistentVolumeClaimLister,
 	pdScaler Scaler,
@@ -68,6 +70,7 @@ func NewPDMemberManager(pdControl controller.PDControlInterface,
 		setLister,
 		svcLister,
 		podLister,
+		epsLister,
 		podControl,
 		pvcLister,
 		pdScaler,
@@ -258,18 +261,27 @@ func (pmm *pdMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set 
 
 	pdClient := pmm.pdControl.GetPDClient(tc)
 
+	healthInfo, err := pdClient.GetHealth()
+	if err != nil {
+		tc.Status.PD.Synced = false
+		// get endpoints info
+		eps, epErr := pmm.epsLister.Endpoints(ns).Get(controller.PDMemberName(tcName))
+		if epErr != nil {
+			return fmt.Errorf("%s, %s", err, epErr)
+		}
+		// pd service has no endpoints
+		if eps != nil && len(eps.Subsets) == 0 {
+			return fmt.Errorf("%s, service %s/%s has no endpoints", err, ns, controller.PDMemberName(tcName))
+		}
+		return err
+	}
+
 	cluster, err := pdClient.GetCluster()
 	if err != nil {
 		tc.Status.PD.Synced = false
 		return err
 	}
 	tc.Status.ClusterID = strconv.FormatUint(cluster.Id, 10)
-
-	healthInfo, err := pdClient.GetHealth()
-	if err != nil {
-		tc.Status.PD.Synced = false
-		return err
-	}
 	leader, err := pdClient.GetPDLeader()
 	if err != nil {
 		tc.Status.PD.Synced = false
@@ -404,7 +416,7 @@ func (pmm *pdMemberManager) getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster) 
 	ns := tc.Namespace
 	tcName := tc.Name
 	instanceName := tc.GetLabels()[label.InstanceLabelKey]
-	pdConfigMap := controller.PDMemberName(tcName)
+	pdConfigMap := controller.MemberConfigMapName(tc, v1alpha1.PDMemberType)
 
 	annMount, annVolume := annotationsMountVolume()
 	volMounts := []corev1.VolumeMount{
@@ -448,6 +460,7 @@ func (pmm *pdMemberManager) getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster) 
 	}
 	pdLabel := label.New().Instance(instanceName).PD()
 	setName := controller.PDMemberName(tcName)
+	podAnnotations := CombineAnnotations(controller.AnnProm(2379), tc.Spec.PD.Annotations)
 	storageClassName := tc.Spec.PD.StorageClassName
 	if storageClassName == "" {
 		storageClassName = controller.DefaultStorageClassName
@@ -472,16 +485,12 @@ func (pmm *pdMemberManager) getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster) 
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      pdLabel.Labels(),
-					Annotations: controller.AnnProm(2379),
+					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
 					SchedulerName: tc.Spec.SchedulerName,
-					Affinity: util.AffinityForNodeSelector(
-						ns,
-						tc.Spec.PD.NodeSelectorRequired,
-						label.New().Instance(instanceName).PD(),
-						tc.Spec.PD.NodeSelector,
-					),
+					Affinity:      tc.Spec.PD.Affinity,
+					NodeSelector:  tc.Spec.PD.NodeSelector,
 					Containers: []corev1.Container{
 						{
 							Name:            v1alpha1.PDMemberType.String(),

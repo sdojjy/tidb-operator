@@ -7,8 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/tidb-operator/tests/slack"
-
+	// To register MySQL driver
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/golang/glog"
 	"github.com/pingcap/errors"
@@ -16,6 +15,7 @@ import (
 	"github.com/pingcap/tidb-operator/pkg/label"
 	"github.com/pingcap/tidb-operator/tests/pkg/client"
 	"github.com/pingcap/tidb-operator/tests/pkg/ops"
+	"github.com/pingcap/tidb-operator/tests/slack"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -57,14 +57,15 @@ func (oa *operatorActions) TruncateSSTFileThenCheckFailover(info *TidbClusterCon
 	if len(store.ID) == 0 {
 		glog.Errorf("failed to find an up store")
 		return errors.New("no up store for truncating sst file")
-	} else {
-		glog.Infof("truncate sst file target store: id=%s pod=%s", store.ID, store.PodName)
 	}
+	glog.Infof("truncate sst file target store: id=%s pod=%s", store.ID, store.PodName)
 
 	oa.EmitEvent(info, fmt.Sprintf("TruncateSSTFile: tikv: %s", store.PodName))
 	glog.Infof("deleting pod: [%s/%s] and wait 1 minute for the pod to terminate", info.Namespace, store.PodName)
 	err = cli.CoreV1().Pods(info.Namespace).Delete(store.PodName, nil)
 	if err != nil {
+		glog.Errorf("failed to get delete the pod: ns=%s tc=%s pod=%s err=%s",
+			info.Namespace, info.ClusterName, store.PodName, err.Error())
 		return err
 	}
 
@@ -77,6 +78,8 @@ func (oa *operatorActions) TruncateSSTFileThenCheckFailover(info *TidbClusterCon
 		Store:     store.ID,
 	})
 	if err != nil {
+		glog.Errorf("failed to truncate the sst file: ns=%s tc=%s store=%s err=%s",
+			info.Namespace, info.ClusterName, store.ID, err.Error())
 		return err
 	}
 	oa.EmitEvent(info, fmt.Sprintf("TruncateSSTFile: tikv: %s/%s", info.Namespace, store.PodName))
@@ -478,7 +481,7 @@ func (oa *operatorActions) CheckOneApiserverDownOrDie(operatorConfig *OperatorCo
 	if schedulerPod != nil {
 		affectedPods[schedulerPod.GetName()] = schedulerPod
 	}
-	dnsPod, err := GetDnsPod(oa.kubeCli, faultNode)
+	dnsPod, err := GetDNSPod(oa.kubeCli, faultNode)
 	if err != nil {
 		slack.NotifyAndPanic(fmt.Errorf("can't find controller-manager in node:%s", faultNode))
 	}
@@ -502,6 +505,19 @@ func (oa *operatorActions) CheckOneApiserverDownOrDie(operatorConfig *OperatorCo
 		}
 		glog.V(4).Infof("all clusters is available")
 		return nil
+	})
+}
+
+func (oa *operatorActions) CheckOperatorDownOrDie(clusters []*TidbClusterConfig) {
+	glog.Infof("checking k8s/tidbCluster status when operator down")
+
+	KeepOrDie(3*time.Second, 10*time.Minute, func() error {
+		err := oa.CheckK8sAvailable(nil, nil)
+		if err != nil {
+			return err
+		}
+
+		return oa.CheckTidbClustersAvailable(clusters)
 	})
 }
 
@@ -584,9 +600,15 @@ func (oa *operatorActions) CheckTidbClustersAvailable(infos []*TidbClusterConfig
 
 }
 
+func (oa *operatorActions) CheckTidbClustersAvailableOrDie(infos []*TidbClusterConfig) {
+	if err := oa.CheckTidbClustersAvailable(infos); err != nil {
+		slack.NotifyAndPanic(err)
+	}
+}
+
 var testTableName = "testTable"
 
-func (op *operatorActions) addDataToCluster(info *TidbClusterConfig) (bool, error) {
+func (oa *operatorActions) addDataToCluster(info *TidbClusterConfig) (bool, error) {
 	db, err := sql.Open("mysql", getDSN(info.Namespace, info.ClusterName, "test", info.Password))
 	if err != nil {
 		glog.Errorf("cluster:[%s] can't open connection to mysql: %v", info.FullName(), err)

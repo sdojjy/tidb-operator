@@ -11,6 +11,19 @@
 
 > 你可以使用阿里云的 [云命令行](https://shell.aliyun.com) 服务来进行操作，云命令行中已经预装并配置好了所有工具。
 
+### 权限
+
+完整部署集群需要下列权限:
+- AliyunECSFullAccess
+- AliyunESSFullAccess
+- AliyunVPCFullAccess
+- AliyunSLBFullAccess
+- AliyunCSFullAccess
+- AliyunEIPFullAccess
+- AliyunECIFullAccess
+- AliyunVPNGatewayFullAccess
+- AliyunNATGatewayFullAccess
+
 ## 概览
 
 默认配置下，我们会创建：
@@ -18,7 +31,7 @@
 - 一个新的 VPC；
 - 一台 ECS 实例作为堡垒机；
 - 一个托管版 ACK(阿里云 Kubernetes)集群以及一系列 worker 节点：
-  - 属于一个伸缩组的 2 台 ECS 实例(1核1G), 托管版 Kubernetes 的默认伸缩组中必须至少有两台实例, 用于承载整个的系统服务, 比如 CoreDNS
+  - 属于一个伸缩组的 2 台 ECS 实例(2核2G), 托管版 Kubernetes 的默认伸缩组中必须至少有两台实例, 用于承载整个的系统服务, 比如 CoreDNS
   - 属于一个伸缩组的 3 台 `ecs.i2.xlarge` 实例, 用于部署 PD
   - 属于一个伸缩组的 3 台 `ecs.i2.2xlarge` 实例, 用于部署 TiKV
   - 属于一个伸缩组的 2 台 ECS 实例(16核32G)用于部署 TiDB
@@ -42,10 +55,12 @@ export TF_VAR_ALICLOUD_SECRET_KEY=<YOUR_SECRET_KEY>
 
 ```shell
 $ git clone https://github.com/pingcap/tidb-operator
-$ cd tidb-operator/deploy/alicloud
+$ cd tidb-operator/deploy/aliyun
 $ terraform init
 $ terraform apply
 ```
+
+假如在运行 `terraform apply` 时出现报错, 请根据报错信息(比如缺少权限)进行修复后再次运行 `terraform apply`
 
 整个安装过程大约需要 5 至 10 分钟，安装完成后会输出集群的关键信息(想要重新查看这些信息，可以运行 `terraform output`)：
 
@@ -55,16 +70,16 @@ Apply complete! Resources: 3 added, 0 changed, 1 destroyed.
 Outputs:
 
 bastion_ip = 1.2.3.4
-bastion_key_file = /root/tidb-operator/deploy/alicloud/credentials/tidb-cluster-bastion-key.pem
+bastion_key_file = /root/tidb-operator/deploy/aliyun/credentials/tidb-cluster-bastion-key.pem
 cluster_id = ca57c6071f31f458da66965ceddd1c31b
-kubeconfig_file = /root/tidb-operator/deploy/alicloud/.terraform/modules/a2078f76522ae433133fc16e24bd21ae/kubeconfig_tidb-cluster
+kubeconfig_file = /root/tidb-operator/deploy/aliyun/.terraform/modules/a2078f76522ae433133fc16e24bd21ae/kubeconfig_tidb-cluster
 monitor_endpoint = 1.2.3.4:3000
 region = cn-hangzhou
 tidb_port = 4000
 tidb_slb_ip = 192.168.5.53
-tidb_version = v2.1.0
+tidb_version = v3.0.0-rc.1
 vpc_id = vpc-bp16wcbu0xhbg833fymmc
-worker_key_file = /root/tidb-operator/deploy/alicloud/credentials/tidb-cluster-node-key.pem
+worker_key_file = /root/tidb-operator/deploy/aliyun/credentials/tidb-cluster-node-key.pem
 ```
 
 接下来可以用 `kubectl` 或 `helm` 对集群进行操作（其中 `cluster_name` 默认值为 `tidb-cluster`）：
@@ -111,6 +126,13 @@ watch kubectl get pods --namespace tidb -o wide
 
 ```shell
 $ terraform destroy
+```
+
+假如 kubernetes 集群没有创建成功，那么在 destroy 时会出现报错，无法进行正常清理。 此时需要手动将 kubernetes 资源从本地状态中移除:
+
+```shell
+$ terraform state list
+$ terraform state rm module.ack.alicloud_cs_managed_kubernetes.k8s
 ```
 
 销毁集群操作需要执行较长时间。

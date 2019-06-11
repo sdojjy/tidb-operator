@@ -37,13 +37,20 @@ type Config struct {
 	CertFile         string
 	KeyFile          string
 
+	PDMaxReplicas       int `yaml:"pd_max_replicas" json:"pd_max_replicas"`
+	TiKVGrpcConcurrency int `yaml:"tikv_grpc_concurrency" json:"tikv_grpc_concurrency"`
+	TiDBTokenLimit      int `yaml:"tidb_token_limit" json:"tidb_token_limit"`
+
 	// Block writer
 	BlockWriter blockwriter.Config `yaml:"block_writer,omitempty"`
 
 	// For local test
+	OperatorRepoUrl string `yaml:"operator_repo_url" json:"operator_repo_url"`
 	OperatorRepoDir string `yaml:"operator_repo_dir" json:"operator_repo_dir"`
 	// chart dir
 	ChartDir string `yaml:"chart_dir" json:"chart_dir"`
+	// manifest dir
+	ManifestDir string `yaml:"manifest_dir" json:"manifest_dir"`
 }
 
 // Nodes defines a series of nodes that belong to the same physical node.
@@ -55,6 +62,12 @@ type Nodes struct {
 // NewConfig creates a new config.
 func NewConfig() (*Config, error) {
 	cfg := &Config{
+		OperatorRepoUrl: "https://github.com/pingcap/tidb-operator.git",
+
+		PDMaxReplicas:       5,
+		TiDBTokenLimit:      1024,
+		TiKVGrpcConcurrency: 8,
+
 		BlockWriter: blockwriter.Config{
 			TableNum:    defaultTableNum,
 			Concurrency: defaultConcurrency,
@@ -65,11 +78,12 @@ func NewConfig() (*Config, error) {
 	flag.StringVar(&cfg.configFile, "config", "", "Config file")
 	flag.StringVar(&cfg.LogDir, "log-dir", "/logDir", "log directory")
 	flag.IntVar(&cfg.FaultTriggerPort, "fault-trigger-port", 23332, "the http port of fault trigger service")
-	flag.StringVar(&cfg.TidbVersions, "tidb-versions", "v2.1.7,v2.1.8", "tidb versions")
+	flag.StringVar(&cfg.TidbVersions, "tidb-versions", "v3.0.0-beta.1,v3.0.0-rc.1", "tidb versions")
 	flag.StringVar(&cfg.OperatorTag, "operator-tag", "master", "operator tag used to choose charts")
 	flag.StringVar(&cfg.OperatorImage, "operator-image", "pingcap/tidb-operator:latest", "operator image")
 	flag.StringVar(&cfg.OperatorRepoDir, "operator-repo-dir", "/tidb-operator", "local directory to which tidb-operator cloned")
-	flag.StringVar(&slack.WebhookUrl, "slack-webhook-url", "", "slack webhook url")
+	flag.StringVar(&cfg.ChartDir, "chart-dir", "", "chart dir")
+	flag.StringVar(&slack.WebhookURL, "slack-webhook-url", "", "slack webhook url")
 	flag.Parse()
 
 	operatorRepo, err := ioutil.TempDir("", "tidb-operator")
@@ -78,11 +92,20 @@ func NewConfig() (*Config, error) {
 	}
 	cfg.OperatorRepoDir = operatorRepo
 
-	chartDir, err := ioutil.TempDir("", "charts")
+	if strings.TrimSpace(cfg.ChartDir) == "" {
+		chartDir, err := ioutil.TempDir("", "charts")
+		if err != nil {
+			return nil, err
+		}
+		cfg.ChartDir = chartDir
+	}
+
+	manifestDir, err := ioutil.TempDir("", "manifests")
 	if err != nil {
 		return nil, err
 	}
-	cfg.ChartDir = chartDir
+	cfg.ManifestDir = manifestDir
+
 	return cfg, nil
 }
 
@@ -122,11 +145,7 @@ func (c *Config) configFromFile(path string) error {
 		return err
 	}
 
-	if err = yaml.Unmarshal(data, c); err != nil {
-		return err
-	}
-
-	return nil
+	return yaml.Unmarshal(data, c)
 }
 
 func (c *Config) GetTiDBVersion() (string, error) {

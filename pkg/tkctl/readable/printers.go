@@ -38,13 +38,12 @@ type PodBasicColumns struct {
 	Reason   string
 	Restarts int64
 	Memory   string
-	CPU      string
 	Age      string
-	PodIp    string
-	HostIp   string
+	PodIP    string
+	HostIP   string
 
 	MemInfo string
-	CpuInfo string
+	CPUInfo string
 }
 
 func AddHandlers(h printers.PrintHandler) {
@@ -141,10 +140,10 @@ func printPod(pod *v1.Pod, options printers.PrintOptions) ([]metav1beta1.TableRo
 		columns.Ready,
 		columns.Reason,
 		columns.MemInfo,
-		columns.CPU,
+		columns.CPUInfo,
 		columns.Restarts,
 		columns.Age,
-		columns.HostIp)
+		columns.HostIP)
 	return []metav1beta1.TableRow{row}, nil
 }
 
@@ -326,10 +325,10 @@ func basicPodColumns(pod *v1.Pod) *PodBasicColumns {
 		Reason:   reason,
 		Restarts: int64(restarts),
 		Age:      translateTimestampSince(pod.CreationTimestamp),
-		HostIp:   hostIP,
-		PodIp:    podIP,
+		HostIP:   hostIP,
+		PodIP:    podIP,
 		MemInfo:  memInfo,
-		CpuInfo:  cpuInfo,
+		CPUInfo:  cpuInfo,
 	}
 }
 

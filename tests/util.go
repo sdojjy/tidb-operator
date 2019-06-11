@@ -14,6 +14,9 @@
 package tests
 
 import (
+	"bytes"
+	"fmt"
+	"html/template"
 	"math/rand"
 	"time"
 
@@ -56,7 +59,7 @@ func GetSchedulerPod(kubeCli kubernetes.Interface, node string) (*corev1.Pod, er
 	return GetKubeComponent(kubeCli, node, "kube-scheduler")
 }
 
-func GetDnsPod(kubeCli kubernetes.Interface, node string) (*corev1.Pod, error) {
+func GetDNSPod(kubeCli kubernetes.Interface, node string) (*corev1.Pod, error) {
 	return GetKubeComponent(kubeCli, node, "kube-dns")
 }
 
@@ -77,4 +80,50 @@ func GetKubeComponent(kubeCli kubernetes.Interface, node string, componentName s
 		}
 	}
 	return nil, nil
+}
+
+var affinityTemp string = `{{.Kind}}:
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: {{.Weight}}
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{.ClusterName}}
+              app.kubernetes.io/component: {{.Kind}}
+          topologyKey: "rack"
+          namespaces:
+          - {{.Namespace}}
+`
+
+type AffinityInfo struct {
+	ClusterName string
+	Kind        string
+	Weight      int
+	Namespace   string
+}
+
+func GetAffinityConfigOrDie(clusterName, namespace string) string {
+	temp, err := template.New("dt-affinity").Parse(affinityTemp)
+	if err != nil {
+		slack.NotifyAndPanic(err)
+	}
+
+	pdbuff := new(bytes.Buffer)
+	err = temp.Execute(pdbuff, &AffinityInfo{ClusterName: clusterName, Kind: "pd", Weight: 50, Namespace: namespace})
+	if err != nil {
+		slack.NotifyAndPanic(err)
+	}
+	tikvbuff := new(bytes.Buffer)
+	err = temp.Execute(tikvbuff, &AffinityInfo{ClusterName: clusterName, Kind: "tikv", Weight: 50, Namespace: namespace})
+	if err != nil {
+		slack.NotifyAndPanic(err)
+	}
+	tidbbuff := new(bytes.Buffer)
+	err = temp.Execute(tidbbuff, &AffinityInfo{ClusterName: clusterName, Kind: "tidb", Weight: 50, Namespace: namespace})
+	if err != nil {
+		slack.NotifyAndPanic(err)
+	}
+	return fmt.Sprintf("%s%s%s", pdbuff.String(), tikvbuff.String(), tidbbuff.String())
 }

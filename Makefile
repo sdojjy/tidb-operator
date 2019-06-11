@@ -16,7 +16,6 @@ LDFLAGS = $(shell ./hack/version.sh)
 DOCKER_REGISTRY := $(if $(DOCKER_REGISTRY),$(DOCKER_REGISTRY),localhost:5000)
 
 PACKAGE_LIST := go list ./... | grep -vE "pkg/client" | grep -vE "zz_generated"
-PACKAGES := $$($(PACKAGE_LIST))
 PACKAGE_DIRECTORIES := $(PACKAGE_LIST) | sed 's|github.com/pingcap/tidb-operator/||'
 FILES := $$(find $$($(PACKAGE_DIRECTORIES)) -name "*.go")
 FAIL_ON_STDOUT := awk '{ print } END { if (NR > 0) { exit 1 } }'
@@ -29,7 +28,7 @@ docker-push: docker
 docker: build
 	docker build --tag "${DOCKER_REGISTRY}/pingcap/tidb-operator:latest" images/tidb-operator
 
-build: controller-manager scheduler discovery
+build: controller-manager scheduler discovery admission-controller
 
 controller-manager:
 	$(GO) -ldflags '$(LDFLAGS)' -o images/tidb-operator/bin/tidb-controller-manager cmd/controller-manager/main.go
@@ -39,6 +38,9 @@ scheduler:
 
 discovery:
 	$(GO) -ldflags '$(LDFLAGS)' -o images/tidb-operator/bin/tidb-discovery cmd/discovery/main.go
+
+admission-controller:
+	$(GO) -ldflags '$(LDFLAGS)' -o images/tidb-operator/bin/tidb-admission-controller cmd/admission-controller/main.go
 
 e2e-setup:
 	# ginkgo doesn't work with retool for Go 1.11
@@ -51,9 +53,11 @@ e2e-docker: e2e-build
 	[ -d tests/images/e2e/tidb-operator ] && rm -r tests/images/e2e/tidb-operator || true
 	[ -d tests/images/e2e/tidb-cluster ] && rm -r tests/images/e2e/tidb-cluster || true
 	[ -d tests/images/e2e/tidb-backup ] && rm -r tests/images/e2e/tidb-backup || true
+	[ -d tests/images/e2e/manifests ] && rm -r tests/images/e2e/manifests || true
 	cp -r charts/tidb-operator tests/images/e2e
 	cp -r charts/tidb-cluster tests/images/e2e
 	cp -r charts/tidb-backup tests/images/e2e
+	cp -r manifests tests/images/e2e
 	docker build -t "${DOCKER_REGISTRY}/pingcap/tidb-operator-e2e:latest" tests/images/e2e
 
 e2e-build: e2e-setup
@@ -75,7 +79,7 @@ test:
 	@echo "Run unit tests"
 	@$(GOTEST) ./pkg/... -coverprofile=coverage.txt -covermode=atomic && echo "\nUnit tests run successfully!"
 
-check-all: lint check-static check-shadow check-gosec megacheck errcheck
+check-all: lint check-static check-shadow check-gosec staticcheck errcheck
 
 check-setup:
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
@@ -95,11 +99,11 @@ check-static:
 	  --enable ineffassign \
 	  $$($(PACKAGE_DIRECTORIES))
 
-# TODO: megacheck is too slow currently
-megacheck:
-	@echo "gometalinter megacheck"
+# TODO: staticcheck is too slow currently
+staticcheck:
+	@echo "gometalinter staticcheck"
 	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all --deadline 120s \
-	  --enable megacheck \
+	  --enable staticcheck \
 	  $$($(PACKAGE_DIRECTORIES))
 
 # TODO: errcheck is too slow currently
@@ -117,7 +121,7 @@ check-shadow:
 
 lint:
 	@echo "linting"
-	CGO_ENABLED=0 retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))
+	CGO_ENABLED=0 retool do revive -formatter friendly -config revive.toml $$($(PACKAGE_LIST))
 
 check-gosec:
 	@echo "security checking"
